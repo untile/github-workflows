@@ -1,0 +1,72 @@
+name: Test Suite (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: "Node.js version (e.g. '20' or '20.18.0')"
+        required: false
+        default: "20"
+        type: string
+      bun_version:
+        description: "Bun version"
+        required: false
+        default: "latest"
+        type: string
+      lint_commits:
+        description: "Run commitlint step"
+        required: false
+        default: true
+        type: boolean
+      commitlint_config:
+        description: "Path to commitlint config"
+        required: false
+        default: ".commitlintrc.cjs"
+        type: string
+      cache_modules:
+        description: "Enable node_modules/bun.lockb cache"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  test:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📝 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🏗 Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: 🏗 Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ inputs.bun_version }}
+
+      - name: 🏗 Setup module dependencies cache
+        if: ${{ inputs.cache_modules }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            bun.lockb
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lockb') }}
+
+      - name: 📦 Install dependencies
+        run: bun install
+
+      - name: 🧾 Lint commits
+        if: ${{ inputs.lint_commits }}
+        uses: wagoid/commitlint-github-action@v6
+        with:
+          configFile: ${{ inputs.commitlint_config }}
+
+      - name: 🧹 Lint
+        run: bun lint

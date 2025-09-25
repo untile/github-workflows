@@ -9,43 +9,63 @@ Centralizes CI/CD pipelines, composite actions, and shared automation logic to k
 
 - `.github/workflows/` → Reusable workflows (CI, build, deploy, etc.)
 - `actions/` → Composite actions (custom step groups)
+- `documentation/` → Detailed documentation for workflows and their inputs/secrets
 
 ---
 
-## 🚀 Usage
+## 🚀 Available Workflows
 
-### Using a reusable workflow
+### 1. [Mobile Pull Request](documentation/mobile-pull-request.md)
+Reusable workflow to run the mobile project **test suite**, including:
+- Node.js and Bun setup
+- Dependencies installation
+- Commit linting
+- Lint checks
 
-In your project’s `.github/workflows/ci.yml`:
-
-```yaml
-name: CI
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-
-jobs:
-  build:
-    uses: untile/github-workflows/.github/workflows/test.yml@v1
-    with:
-      node_version: "20"
-      run_tests: true
-    secrets: inherit
-```
-
-### Using a composite action
-
-In your workflow:
+Usage example:
 
 ```yaml
 jobs:
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: untile/github-workflows/actions/setup-node-npm@v1
-      - run: npm test
+    uses: untile/github-workflows/.github/workflows/mobile-pull-request.yml@v1
+    with:
+      node_version: "20"
+      bun_version: "latest"
+      lint_commits: true
+      commitlint_config: ".commitlintrc.cjs"
+      cache_modules: true
+```
+
+---
+
+### 2. [Mobile Publish App](documentation/mobile-publish-app.md)
+Reusable workflow to **build and distribute** the iOS app with EAS:
+- Builds with Expo EAS
+- Optionally distributes to **Firebase App Distribution** and/or **TestFlight**
+
+Usage example:
+
+```yaml
+jobs:
+  release:
+    uses: untile/github-workflows/.github/workflows/mobile-publish-app.yml@v1
+    with:
+      environment: preview
+      publish_to_firebase: true
+      publish_to_testflight: false
+      node_version: "23"
+      bun_version: "latest"
+      firebase_groups: "internal-testers"
+      release_notes: "CI build ${{ github.sha }}"
+    secrets:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      PREVIEW_FIREBASE_APP_ID_IOS: ${{ secrets.PREVIEW_FIREBASE_APP_ID_IOS }}
+      PRODUCTION_FIREBASE_APP_ID_IOS: ${{ secrets.PRODUCTION_FIREBASE_APP_ID_IOS }}
+      PREVIEW_FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.PREVIEW_FIREBASE_SERVICE_ACCOUNT_JSON }}
+      PRODUCTION_FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.PRODUCTION_FIREBASE_SERVICE_ACCOUNT_JSON }}
+      APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+      APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+      APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
 ```
 
 ---
@@ -61,8 +81,9 @@ jobs:
 
 1. Create or update workflows under `.github/workflows/`
 2. Create or update composite actions under `actions/`
-3. Test locally in another repository by referencing a branch (e.g., `@main`)
-4. When stable, create a new tag:
+3. Create or update documentation under `documentation/`
+4. Test locally in another repository by referencing a branch (e.g., `@main`)
+5. When stable, create a new tag:
 
 ```bash
 git tag v1.0.0
@@ -77,7 +98,3 @@ git push origin v1.0.0
 - [Creating Composite Actions](https://docs.github.com/en/actions/creating-actions/creating-a-composite-action)
 
 ---
-
-## 📄 License
-
-MIT License

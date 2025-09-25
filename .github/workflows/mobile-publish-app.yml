@@ -1,0 +1,161 @@
+name: Build and Deploy (TestFlight and/or Firebase)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Build profile / environment"
+        type: string
+        required: true
+        default: preview
+      publish_to_firebase:
+        description: "Publish build to Firebase App Distribution?"
+        type: boolean
+        required: false
+        default: true
+      publish_to_testflight:
+        description: "Publish build to TestFlight?"
+        type: boolean
+        required: false
+        default: true
+      node_version:
+        description: "Node.js version"
+        type: string
+        required: false
+        default: "23"
+      bun_version:
+        description: "Bun version"
+        type: string
+        required: false
+        default: "latest"
+      firebase_groups:
+        description: "Firebase testers groups list (comma-separated)"
+        type: string
+        required: false
+        default: "internal-testers"
+      release_notes:
+        description: "Release notes for distribution"
+        type: string
+        required: false
+        default: ""
+    secrets:
+      EXPO_TOKEN:
+        required: true
+      # TestFlight (only required if publish_to_testflight is true)
+      APP_STORE_CONNECT_API_ISSUER_ID:
+        required: false
+      APP_STORE_CONNECT_API_KEY_ID:
+        required: false
+      APP_STORE_CONNECT_API_KEY:
+        required: false
+      # Firebase (only required if publish_to_firebase is true)
+      PREVIEW_FIREBASE_APP_ID_IOS:
+        required: false
+      PRODUCTION_FIREBASE_APP_ID_IOS:
+        required: false
+      PREVIEW_FIREBASE_SERVICE_ACCOUNT_JSON:
+        required: false
+      PRODUCTION_FIREBASE_SERVICE_ACCOUNT_JSON:
+        required: false
+
+jobs:
+  build-and-distribute:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    env:
+      EAS_LOCAL_BUILD_SKIP_CLEANUP: "1"
+      EAS_LOCAL_BUILD_WORKINGDIR: ${{ github.workspace }}/.eas-local
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      IPA_PATH: ${{ github.workspace }}/ios-${{ github.sha }}.ipa
+      FIREBASE_APP_ID: ${{ inputs.environment == 'production' && secrets.PRODUCTION_FIREBASE_APP_ID_IOS || secrets.PREVIEW_FIREBASE_APP_ID_IOS }}
+      FIREBASE_CREDENTIALS: ${{ inputs.environment == 'production' && secrets.PRODUCTION_FIREBASE_SERVICE_ACCOUNT_JSON || secrets.PREVIEW_FIREBASE_SERVICE_ACCOUNT_JSON }}
+
+    steps:
+      - name: 📝 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🔧 Clear conflicting envs
+        run: |
+          unset GOOGLE_APPLICATION_CREDENTIALS || true
+          unset WORKLOAD_IDENTITY_PROVIDER || true
+          unset GCP_WORKLOAD_IDENTITY_PROVIDER || true
+          unset GOOGLE_GHA_CREDS_PATH || true
+
+      - name: 🔍 Preflight Firebase credentials
+        if: ${{ inputs.publish_to_firebase }}
+        run: |
+          if [ -z "${FIREBASE_CREDENTIALS}" ]; then
+            echo "❌ FIREBASE_CREDENTIALS is empty. Check secrets and access."
+            exit 1
+          fi
+          echo "Cred length: $(printf %s "${FIREBASE_CREDENTIALS}" | wc -c)"
+
+      - name: 🏗 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: 🏗 Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ inputs.bun_version }}
+
+      - name: 💾 Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+            **/bun.lockb
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: 📦 Install dependencies
+        run: bun install
+
+      - name: 📦 Install EAS CLI
+        run: bun install -g eas-cli
+
+      - name: 🏗 Build (Expo EAS iOS)
+        run: |
+          eas build --platform ios \
+            --profile ${{ inputs.environment }} \
+            --local --non-interactive \
+            --output "${IPA_PATH}"
+
+      # ---------- TestFlight ----------
+      - name: 🚀 Upload to TestFlight
+        if: ${{ inputs.publish_to_testflight }}
+        uses: apple-actions/upload-testflight-build@v3
+        with:
+          app-path: ${{ env.IPA_PATH }}
+          issuer-id: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          api-key-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          api-private-key: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+
+      # ---------- Firebase ----------
+      - name: 🔐 Google Auth (Service Account via FIREBASE_CREDENTIALS)
+        if: ${{ inputs.publish_to_firebase }}
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ env.FIREBASE_CREDENTIALS }}
+          create_credentials_file: true
+
+      - name: 🔎 Read project_id from FIREBASE_CREDENTIALS
+        if: ${{ inputs.publish_to_firebase }}
+        run: |
+          node -e "const j=JSON.parse(process.env.FIREBASE_CREDENTIALS); console.log('FIREBASE_PROJECT_ID='+j.project_id)" >> $GITHUB_ENV
+
+      - name: 📤 Distribute to Firebase App Distribution
+        if: ${{ inputs.publish_to_firebase }}
+        run: |
+          firebase --version >/dev/null 2>&1 || npm i -g firebase-tools
+          firebase appdistribution:distribute "${IPA_PATH}" \
+            --app "${FIREBASE_APP_ID}" \
+            --project "${FIREBASE_PROJECT_ID}" \
+            --groups "${{ inputs.firebase_groups }}" \
+            --release-notes "${{ inputs.release_notes }}"
