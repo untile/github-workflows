@@ -1,23 +1,44 @@
-name: Build and Deploy (TestFlight and/or Firebase)
+name: Build and Deploy (iOS / Android → TestFlight, Firebase, Play)
 
 on:
   workflow_call:
     inputs:
       environment:
-        description: "Build profile / environment"
+        description: "Build profile / environment (EAS profile)"
         type: string
         required: true
         default: preview
-      publish_to_firebase:
-        description: "Publish build to Firebase App Distribution?"
+
+      # Plataformas
+      build_ios:
+        description: "Build iOS?"
         type: boolean
         required: false
         default: true
+      build_android:
+        description: "Build Android?"
+        type: boolean
+        required: false
+        default: false
+
+      # Publicação
       publish_to_testflight:
-        description: "Publish build to TestFlight?"
+        description: "Publish iOS to TestFlight?"
         type: boolean
         required: false
         default: true
+      publish_to_firebase:
+        description: "Publish builds to Firebase App Distribution?"
+        type: boolean
+        required: false
+        default: true
+      publish_to_play_store:
+        description: "Publish Android to Google Play (AAB)?"
+        type: boolean
+        required: false
+        default: false
+
+      # Tooling
       node_version:
         description: "Node.js version"
         type: string
@@ -28,48 +49,97 @@ on:
         type: string
         required: false
         default: "latest"
+
+      # Distribuição
       firebase_groups:
-        description: "Firebase testers groups list (comma-separated)"
+        description: "Firebase testers groups (comma-separated)"
         type: string
         required: false
         default: "internal-testers"
       release_notes:
-        description: "Release notes for distribution"
+        description: "Release notes"
+        type: string
+        required: false
+        default: "CI build ${{ github.sha }} (${{ inputs.environment }})"
+      android_package_name:
+        description: "Android applicationId (package name) for Play Store"
         type: string
         required: false
         default: ""
+
+      # Play track/status (apenas se publish_to_play_store = true)
+      play_track:
+        description: "Google Play track"
+        type: string
+        required: false
+        default: "internal"
+      play_status:
+        description: "Google Play release status"
+        type: string
+        required: false
+        default: "completed"  # draft | inProgress | halted | completed
+      play_inapp_update_priority:
+        description: "In-app update priority (0-5)"
+        type: string
+        required: false
+        default: "0"
+
     secrets:
       EXPO_TOKEN:
         required: true
-      # TestFlight (only required if publish_to_testflight is true)
+
+      # TestFlight (iOS)
       APP_STORE_CONNECT_API_ISSUER_ID:
         required: false
       APP_STORE_CONNECT_API_KEY_ID:
         required: false
       APP_STORE_CONNECT_API_KEY:
         required: false
-      # Firebase (only required if publish_to_firebase is true)
+
+      # Firebase App IDs por plataforma/ambiente
       PREVIEW_FIREBASE_APP_ID_IOS:
         required: false
       PRODUCTION_FIREBASE_APP_ID_IOS:
         required: false
+      PREVIEW_FIREBASE_APP_ID_ANDROID:
+        required: false
+      PRODUCTION_FIREBASE_APP_ID_ANDROID:
+        required: false
+
+      # Firebase service accounts
       PREVIEW_FIREBASE_SERVICE_ACCOUNT_JSON:
         required: false
       PRODUCTION_FIREBASE_SERVICE_ACCOUNT_JSON:
         required: false
 
+      # Google Play
+      PLAY_SERVICE_ACCOUNT_JSON:
+        required: false
+
 jobs:
   build-and-distribute:
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     env:
+      # Auth / workspace
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       EAS_LOCAL_BUILD_SKIP_CLEANUP: "1"
       EAS_LOCAL_BUILD_WORKINGDIR: ${{ github.workspace }}/.eas-local
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-      IPA_PATH: ${{ github.workspace }}/ios-${{ github.sha }}.ipa
-      FIREBASE_APP_ID: ${{ inputs.environment == 'production' && secrets.PRODUCTION_FIREBASE_APP_ID_IOS || secrets.PREVIEW_FIREBASE_APP_ID_IOS }}
+
+      # Versão (preenchida depois)
+      PKG_VERSION: ""
+      BUILD_SHA: ${{ github.sha }}
+
+      # Artifacts
+      IOS_IPA_PATH: ${{ github.workspace }}/ios-${{ github.sha }}.ipa
+      ANDROID_AAB_PATH: ${{ github.workspace }}/android-${{ github.sha }}.aab
+      ANDROID_APK_PATH: ${{ github.workspace }}/android-${{ github.sha }}.apk
+
+      # Firebase by env
       FIREBASE_CREDENTIALS: ${{ inputs.environment == 'production' && secrets.PRODUCTION_FIREBASE_SERVICE_ACCOUNT_JSON || secrets.PREVIEW_FIREBASE_SERVICE_ACCOUNT_JSON }}
+      FIREBASE_APP_ID_IOS: ${{ inputs.environment == 'production' && secrets.PRODUCTION_FIREBASE_APP_ID_IOS || secrets.PREVIEW_FIREBASE_APP_ID_IOS }}
+      FIREBASE_APP_ID_ANDROID: ${{ inputs.environment == 'production' && secrets.PRODUCTION_FIREBASE_APP_ID_ANDROID || secrets.PREVIEW_FIREBASE_APP_ID_ANDROID }}
 
     steps:
       - name: 📝 Checkout repository
@@ -84,15 +154,7 @@ jobs:
           unset GCP_WORKLOAD_IDENTITY_PROVIDER || true
           unset GOOGLE_GHA_CREDS_PATH || true
 
-      - name: 🔍 Preflight Firebase credentials
-        if: ${{ inputs.publish_to_firebase }}
-        run: |
-          if [ -z "${FIREBASE_CREDENTIALS}" ]; then
-            echo "❌ FIREBASE_CREDENTIALS is empty. Check secrets and access."
-            exit 1
-          fi
-          echo "Cred length: $(printf %s "${FIREBASE_CREDENTIALS}" | wc -c)"
-
+      # Tooling
       - name: 🏗 Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -103,7 +165,26 @@ jobs:
         with:
           bun-version: ${{ inputs.bun_version }}
 
-      - name: 💾 Cache Bun dependencies
+      - name: ☕ Setup Java (Android)
+        if: ${{ inputs.build_android }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 🤖 Setup Android SDK
+        if: ${{ inputs.build_android }}
+        uses: android-actions/setup-android@v3
+
+      # Expo/EAS (garante login + CLI)
+      - name: 🧰 Setup Expo & EAS
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 💾 Cache deps (Bun / node_modules)
         uses: actions/cache@v4
         with:
           path: |
@@ -117,45 +198,128 @@ jobs:
       - name: 📦 Install dependencies
         run: bun install
 
-      - name: 📦 Install EAS CLI
-        run: bun install -g eas-cli
+      - name: 🚦 Read package version
+        id: package_version
+        uses: martinbeentjes/npm-get-version-action@v1.3.1
 
-      - name: 🏗 Build (Expo EAS iOS)
+      - name: 🏷️ Export version to env
+        run: echo "PKG_VERSION=${{ steps.package_version.outputs.current-version }}" >> $GITHUB_ENV
+
+      # -------- iOS Build --------
+      - name: 🏗 Build iOS (EAS → IPA)
+        if: ${{ inputs.build_ios }}
         run: |
           eas build --platform ios \
             --profile ${{ inputs.environment }} \
             --local --non-interactive \
-            --output "${IPA_PATH}"
+            --output "${IOS_IPA_PATH}"
 
-      # ---------- TestFlight ----------
-      - name: 🚀 Upload to TestFlight
-        if: ${{ inputs.publish_to_testflight }}
+      # -------- Android Builds (AAB + APK) --------
+      - name: 🏗 Build Android AAB (EAS)
+        if: ${{ inputs.build_android }}
+        run: |
+          OUT="${{ github.workspace }}/android-${{ env.PKG_VERSION }}-${{ env.BUILD_SHA }}.aab"
+          eas build --platform android \
+            --profile ${{ inputs.environment }} \
+            --local --non-interactive \
+            --output "${OUT}"
+          echo "ANDROID_AAB_PATH=${OUT}" >> $GITHUB_ENV
+
+      - name: 🏗 Build Android APK (EAS)
+        if: ${{ inputs.build_android }}
+        run: |
+          OUT="${{ github.workspace }}/android-${{ env.PKG_VERSION }}-${{ env.BUILD_SHA }}.apk"
+          eas build --platform android \
+            --profile ${{ inputs.environment }} \
+            --local --non-interactive \
+            --output "${OUT}"
+          echo "ANDROID_APK_PATH=${OUT}" >> $GITHUB_ENV
+
+      # -------- Upload artifacts --------
+      - name: ⬆️ Upload IPA artifact
+        if: ${{ inputs.build_ios }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa-${{ env.PKG_VERSION }}-${{ env.BUILD_SHA }}
+          path: ${{ env.IOS_IPA_PATH }}
+
+      - name: ⬆️ Upload AAB artifact
+        if: ${{ inputs.build_android }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-aab-${{ env.PKG_VERSION }}-${{ env.BUILD_SHA }}
+          path: ${{ env.ANDROID_AAB_PATH }}
+
+      - name: ⬆️ Upload APK artifact
+        if: ${{ inputs.build_android }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-${{ env.PKG_VERSION }}-${{ env.BUILD_SHA }}
+          path: ${{ env.ANDROID_APK_PATH }}
+
+      # -------- TestFlight (iOS) --------
+      - name: 🚀 Upload iOS to TestFlight
+        if: ${{ inputs.build_ios && inputs.publish_to_testflight }}
         uses: apple-actions/upload-testflight-build@v3
         with:
-          app-path: ${{ env.IPA_PATH }}
+          app-path: ${{ env.IOS_IPA_PATH }}
           issuer-id: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
           api-key-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           api-private-key: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
 
-      # ---------- Firebase ----------
-      - name: 🔐 Google Auth (Service Account via FIREBASE_CREDENTIALS)
-        if: ${{ inputs.publish_to_firebase }}
+      # -------- Firebase Auth (se necessário) --------
+      - name: 🔐 Google Auth (Service Account)
+        if: ${{ inputs.publish_to_firebase && (inputs.build_ios || inputs.build_android) }}
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ env.FIREBASE_CREDENTIALS }}
           create_credentials_file: true
 
       - name: 🔎 Read project_id from FIREBASE_CREDENTIALS
-        if: ${{ inputs.publish_to_firebase }}
+        if: ${{ inputs.publish_to_firebase && (inputs.build_ios || inputs.build_android) }}
         run: |
           node -e "const j=JSON.parse(process.env.FIREBASE_CREDENTIALS); console.log('FIREBASE_PROJECT_ID='+j.project_id)" >> $GITHUB_ENV
 
-      - name: 📤 Distribute to Firebase App Distribution
-        if: ${{ inputs.publish_to_firebase }}
+      # -------- Firebase: iOS --------
+      - name: 📤 Distribute iOS to Firebase
+        if: ${{ inputs.publish_to_firebase && inputs.build_ios }}
         run: |
           firebase --version >/dev/null 2>&1 || npm i -g firebase-tools
-          firebase appdistribution:distribute "${IPA_PATH}" \
-            --app "${FIREBASE_APP_ID}" \
+          firebase appdistribution:distribute "${IOS_IPA_PATH}" \
+            --app "${FIREBASE_APP_ID_IOS}" \
             --project "${FIREBASE_PROJECT_ID}" \
             --groups "${{ inputs.firebase_groups }}" \
             --release-notes "${{ inputs.release_notes }}"
+
+      # -------- Firebase: Android (AAB + APK) --------
+      - name: 📤 Distribute Android AAB to Firebase
+        if: ${{ inputs.publish_to_firebase && inputs.build_android }}
+        run: |
+          firebase --version >/dev/null 2>&1 || npm i -g firebase-tools
+          firebase appdistribution:distribute "${ANDROID_AAB_PATH}" \
+            --app "${FIREBASE_APP_ID_ANDROID}" \
+            --project "${FIREBASE_PROJECT_ID}" \
+            --groups "${{ inputs.firebase_groups }}" \
+            --release-notes "${{ inputs.release_notes }}"
+
+      - name: 📤 Distribute Android APK to Firebase
+        if: ${{ inputs.publish_to_firebase && inputs.build_android }}
+        run: |
+          firebase --version >/dev/null 2>&1 || npm i -g firebase-tools
+          firebase appdistribution:distribute "${ANDROID_APK_PATH}" \
+            --app "${FIREBASE_APP_ID_ANDROID}" \
+            --project "${FIREBASE_PROJECT_ID}" \
+            --groups "${{ inputs.firebase_groups }}" \
+            --release-notes "${{ inputs.release_notes }}"
+
+      # -------- Google Play (Android) --------
+      - name: 🛒 Publish Android to Google Play (AAB)
+        if: ${{ inputs.publish_to_play_store && inputs.build_android && inputs.android_package_name != '' }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ inputs.android_package_name }}
+          releaseFiles: ${{ env.ANDROID_AAB_PATH }}
+          track: ${{ inputs.play_track }}
+          status: ${{ inputs.play_status }}
+          inAppUpdatePriority: ${{ inputs.play_inapp_update_priority }}
