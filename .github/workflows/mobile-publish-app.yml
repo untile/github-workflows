@@ -60,7 +60,7 @@ on:
 
 jobs:
   build-and-distribute:
-    runs-on: macos-latest
+    runs-on: macOS
     timeout-minutes: 60
 
     env:
