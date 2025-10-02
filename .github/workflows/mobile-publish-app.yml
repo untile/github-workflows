@@ -64,6 +64,8 @@ jobs:
     timeout-minutes: 60
 
     env:
+      NODE_ENV: production
+      NODE_CONFIG_ENV: ${{ inputs.environment }}
       EAS_LOCAL_BUILD_SKIP_CLEANUP: "1"
       EAS_LOCAL_BUILD_WORKINGDIR: ${{ github.workspace }}/.eas-local
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -130,6 +132,7 @@ jobs:
 
       - name: 🏗 Build (Expo EAS iOS)
         run: |
+          echo $NODE_CONFIG_ENV
           eas build --platform ios \
             --profile ${{ inputs.environment }} \
             --local --non-interactive \
