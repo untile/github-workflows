@@ -126,7 +126,7 @@ jobs:
 
       - name: ⬇️ Pull EAS env
         run: |
-          npx eas env:pull --environment ${{ inputs.environment }} --force
+          eas env:pull --environment ${{ inputs.environment }} --force
 
       - name: 🏗 Build (Expo EAS iOS)
         run: |
