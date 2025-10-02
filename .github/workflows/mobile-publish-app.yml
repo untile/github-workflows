@@ -120,6 +120,14 @@ jobs:
       - name: 📦 Install EAS CLI
         run: bun install -g eas-cli
 
+      - name: 🧹 Clean env files
+        run: |
+          rm -f .env .env.local
+
+      - name: ⬇️ Pull EAS env
+        run: |
+          npx eas env:pull --environment ${{ inputs.environment }} --force
+
       - name: 🏗 Build (Expo EAS iOS)
         run: |
           eas build --platform ios \
