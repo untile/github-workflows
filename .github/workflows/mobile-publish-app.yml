@@ -129,6 +129,10 @@ jobs:
       - name: ⬇️ Pull EAS env
         run: |
           eas env:pull --environment ${{ inputs.environment }} --force
+          set -o allexport
+          source .env.local
+          set +o allexport
+          echo "Environment: $EXPO_PUBLIC_ENV"
 
       - name: 🏗 Build (Expo EAS iOS)
         run: |
