@@ -95,26 +95,41 @@ jobs:
           fi
           echo "Cred length: $(printf %s "${FIREBASE_CREDENTIALS}" | wc -c)"
 
+      - name: 🧹 Clean EAS & build caches
+        if: always()
+        run: |
+          echo "🧹 Cleaning previous EAS build caches and artefacts..."
+          rm -rf ~/.eas/build
+          rm -rf ~/.expo
+          rm -rf ~/.expo-cache
+          rm -rf ~/.expo-shared
+          rm -rf .expo
+          rm -rf .expo-shared
+          rm -rf node_modules/.cache
+          rm -rf ios/build
+          rm -rf android/app/build
+          echo "✅ EAS & build caches cleaned!"
+
       - name: 🏗 Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ inputs.node_version }}
+          node-version: 20
 
       - name: 🏗 Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ inputs.bun_version }}
 
-      - name: 💾 Cache Bun dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.bun/install/cache
-            node_modules
-            **/bun.lockb
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb', '**/package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
+#      - name: 💾 Cache Bun dependencies
+#        uses: actions/cache@v4
+#        with:
+#          path: |
+#            ~/.bun/install/cache
+#            node_modules
+#            **/bun.lockb
+#          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb', '**/package.json') }}
+#          restore-keys: |
+#            ${{ runner.os }}-bun-
 
       - name: 📦 Install dependencies
         run: bun install
@@ -128,18 +143,33 @@ jobs:
 
       - name: ⬇️ Pull EAS env
         run: |
-          eas env:pull --environment ${{ inputs.environment }} --force
-          set -o allexport
-          source .env.local
-          set +o allexport
-          echo "Environment: $EXPO_PUBLIC_ENV"
+          eas env:pull --environment=${{inputs.environment}} --force
+
+          echo "Environment: ${EXPO_PUBLIC_ENV:-not set}"
 
       - name: 🏗 Build (Expo EAS iOS)
+        env:
+          EXPO_PUBLIC_ENV: ${{ inputs.environment }}
         run: |
-          echo $NODE_CONFIG_ENV
+          if [ -z "${EXPO_PUBLIC_ENV}" ]; then
+            echo "❌ EXPO_PUBLIC_ENV is not set!"
+            exit 1
+          fi
+
+          if [ "${EXPO_PUBLIC_ENV}" != "${{ inputs.environment }}" ]; then
+            echo "❌ EXPO_PUBLIC_ENV mismatch! Expected: ${{ inputs.environment }}, Got: ${EXPO_PUBLIC_ENV}"
+            exit 1
+          fi
+
+          echo "✅ Environment validated: ${EXPO_PUBLIC_ENV}"
+
+          printenv | grep EXPO
+          echo "NODE_CONFIG_ENV: $NODE_CONFIG_ENV"
+          echo "Environment: $EXPO_PUBLIC_ENV"
           eas build --platform ios \
             --profile ${{ inputs.environment }} \
             --local --non-interactive \
+            --clear-cache \
             --output "${IPA_PATH}"
 
       # ---------- TestFlight ----------
