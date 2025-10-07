@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git checkout:*)",
+      "WebSearch",
+      "WebFetch(domain:keith.github.io)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

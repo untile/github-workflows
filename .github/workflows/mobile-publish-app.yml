@@ -48,6 +48,10 @@ on:
         required: false
       APP_STORE_CONNECT_API_KEY:
         required: false
+      PREVIEW_APPLE_ID:
+        required: false
+      PRODUCTION_APPLE_ID:
+        required: false
       # Firebase (only required if publish_to_firebase is true)
       PREVIEW_FIREBASE_APP_ID_IOS:
         required: false
@@ -108,49 +112,60 @@ jobs:
           rm -rf node_modules/.cache
           rm -rf ios/build
           rm -rf android/app/build
+
+          echo "🧹 Cleaning Xcode DerivedData and caches..."
+          rm -rf ~/Library/Developer/Xcode/DerivedData
+          rm -rf ~/Library/Caches/com.apple.dt.Xcode
+
           echo "✅ EAS & build caches cleaned!"
 
       - name: 🏗 Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ inputs.node_version }}
 
       - name: 🏗 Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ inputs.bun_version }}
 
-#      - name: 💾 Cache Bun dependencies
-#        uses: actions/cache@v4
-#        with:
-#          path: |
-#            ~/.bun/install/cache
-#            node_modules
-#            **/bun.lockb
-#          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb', '**/package.json') }}
-#          restore-keys: |
-#            ${{ runner.os }}-bun-
-
       - name: 📦 Install dependencies
         run: bun install
 
       - name: 📦 Install EAS CLI
-        run: bun install -g eas-cli
+        run: bun install -g eas-cli@16.20.1
 
       - name: 🧹 Clean env files
         run: |
           rm -f .env .env.local
 
-      - name: ⬇️ Pull EAS env
-        run: |
-          eas env:pull --environment=${{inputs.environment}} --force
-
-          echo "Environment: ${EXPO_PUBLIC_ENV:-not set}"
-
-      - name: 🏗 Build (Expo EAS iOS)
+      - name: 🏗 Load vars and Build (Expo EAS iOS)
         env:
           EXPO_PUBLIC_ENV: ${{ inputs.environment }}
         run: |
+          eas env:pull --environment=${{ inputs.environment }} --force
+
+          rm -rf .env.${{ inputs.environment }}
+          cp .env.local .env
+          cp .env.local .env.${{ inputs.environment }}
+
+          # Export all variables to GITHUB_ENV so they persist across steps
+          while IFS='=' read -r key value; do
+            # Skip empty lines and comments
+            [[ -z "$key" || "$key" =~ ^#.* ]] && continue
+            # Remove quotes from value if present
+            value=$(echo "$value" | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+            # Export to GitHub environment
+            echo "$key=$value" >> $GITHUB_ENV
+            # Also export for current shell
+            export "$key=$value"
+          done < .env.local
+
+          set -a && source .env.local && set +a
+
+          printenv | grep EXPO || echo "No EXPO variables found"
+          echo "Environment: ${EXPO_PUBLIC_ENV:-not set}"
+
           if [ -z "${EXPO_PUBLIC_ENV}" ]; then
             echo "❌ EXPO_PUBLIC_ENV is not set!"
             exit 1
@@ -166,7 +181,8 @@ jobs:
           printenv | grep EXPO
           echo "NODE_CONFIG_ENV: $NODE_CONFIG_ENV"
           echo "Environment: $EXPO_PUBLIC_ENV"
-          eas build --platform ios \
+
+          EAS_NO_XCPRETTY=1 eas build --platform ios \
             --profile ${{ inputs.environment }} \
             --local --non-interactive \
             --clear-cache \
@@ -175,12 +191,56 @@ jobs:
       # ---------- TestFlight ----------
       - name: 🚀 Upload to TestFlight
         if: ${{ inputs.publish_to_testflight }}
-        uses: apple-actions/upload-testflight-build@v3
-        with:
-          app-path: ${{ env.IPA_PATH }}
-          issuer-id: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-          api-key-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          api-private-key: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          echo "📤 Uploading IPA to TestFlight via xcrun altool..."
+          echo "IPA Path: ${IPA_PATH}"
+
+          if [ ! -f "${IPA_PATH}" ]; then
+            echo "❌ IPA file not found at: ${IPA_PATH}"
+            exit 1
+          fi
+
+          # Create the private_keys directory in the expected location
+          PRIVATE_KEYS_DIR="${HOME}/private_keys"
+          mkdir -p "${PRIVATE_KEYS_DIR}"
+
+          # Create the .p8 file with the API key
+          API_KEY_FILE="${PRIVATE_KEYS_DIR}/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8"
+          echo "${{ secrets.APP_STORE_CONNECT_API_KEY }}" > "${API_KEY_FILE}"
+
+          # Determine which Apple ID to use based on environment
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            APPLE_ID="${{ secrets.PRODUCTION_APPLE_ID }}"
+          else
+            APPLE_ID="${{ secrets.PREVIEW_APPLE_ID }}"
+          fi
+
+          echo "Created API key file at: ${API_KEY_FILE}"
+          echo "Using API Key ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}"
+          echo "Using Issuer ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}"
+          echo "Using Apple ID: ${APPLE_ID}"
+
+          # Upload using xcrun altool with explicit Apple ID
+          xcrun altool --upload-app \
+            --type ios \
+            --file "${IPA_PATH}" \
+            --apple-id "${APPLE_ID}" \
+            --apiKey "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
+            --apiIssuer "${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}" \
+            --verbose
+
+          UPLOAD_EXIT_CODE=$?
+
+          # Cleanup API key file and directory
+          rm -f "${API_KEY_FILE}"
+          rmdir "${PRIVATE_KEYS_DIR}" 2>/dev/null || true
+
+          if [ ${UPLOAD_EXIT_CODE} -ne 0 ]; then
+            echo "❌ Upload to TestFlight failed with exit code ${UPLOAD_EXIT_CODE}"
+            exit ${UPLOAD_EXIT_CODE}
+          fi
+
+          echo "✅ Successfully uploaded to TestFlight!"
 
       # ---------- Firebase ----------
       - name: 🔐 Google Auth (Service Account via FIREBASE_CREDENTIALS)
