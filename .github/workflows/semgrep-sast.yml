@@ -1,0 +1,231 @@
+name: Semgrep SAST workflow
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: Path where to run semgrep checks
+        required: false
+        type: string
+        default: '.'
+      skip-dependabot:
+        description: Skip workflow for dependabot PRs
+        required: false
+        type: boolean
+        default: false
+      semgrep-rules:
+        description: List of Semgrep rule sets to run (space-separated)
+        required: false
+        type: string
+        default: 'p/owasp-top-ten p/secrets'
+      create-pr-comment:
+        description: Create PR comments with findings
+        required: false
+        type: boolean
+        default: true
+      create-issues:
+        description: Create issues for findings on master branch
+        required: false
+        type: boolean
+        default: true
+      fail-on-blocking-issues:
+        description: Fail the workflow if blocking issues are found
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  semgrep:
+    name: Semgrep Security Analysis
+    runs-on: ubuntu-latest
+
+    # Skip on dependabot PRs if configured
+    if: ${{ !inputs.skip-dependabot || github.actor != 'dependabot[bot]' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Semgrep
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install semgrep
+
+      - name: Run Semgrep security scan
+        id: semgrep
+        run: |
+          cd ${{ inputs.path }}
+
+          # Build config arguments from semgrep-rules input
+          CONFIG_ARGS=""
+          if [ -f ".semgrep.yml" ]; then
+            CONFIG_ARGS="--config .semgrep.yml"
+          fi
+          for rule in ${{ inputs.semgrep-rules }}; do
+            CONFIG_ARGS="$CONFIG_ARGS --config $rule"
+          done
+
+          semgrep scan \
+            $CONFIG_ARGS \
+            --metrics=off \
+            --json \
+            --output=semgrep-results.json
+        continue-on-error: true
+
+      - name: Generate PR comment
+        if: github.event_name == 'pull_request' && inputs.create-pr-comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read Semgrep JSON results
+            let results;
+            try {
+              results = JSON.parse(fs.readFileSync('${{ inputs.path }}/semgrep-results.json', 'utf8'));
+            } catch (error) {
+              console.log('No results file found or invalid JSON');
+              return;
+            }
+
+            const findings = results.results || [];
+            const errors = findings.filter(f => f.extra.severity === 'ERROR');
+            const warnings = findings.filter(f => f.extra.severity === 'WARNING');
+            const info = findings.filter(f => f.extra.severity === 'INFO');
+
+            if (findings.length === 0) {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: '✅ **Semgrep Security Scan**: No new security issues found!'
+              });
+              return;
+            }
+
+            // Build comment body
+            let comment = `## 🔒 Semgrep Security Scan Results\n\n`;
+            comment += `- ❌ **Errors**: ${errors.length}\n`;
+            comment += `- ⚠️ **Warnings**: ${warnings.length}\n`;
+            comment += `- ℹ️ **Info**: ${info.length}\n\n`;
+
+            if (errors.length > 0) {
+              comment += `### Critical Issues (Must Fix)\n\n`;
+              errors.slice(0, 5).forEach(finding => {
+                const file = finding.path.replace('${{ inputs.path }}/', '');
+                comment += `**${finding.check_id}**\n`;
+                comment += `- File: \`${file}:${finding.start.line}\`\n`;
+                comment += `- ${finding.extra.message}\n`;
+                if (finding.extra.metadata.references) {
+                  comment += `- [Learn more](${finding.extra.metadata.references[0]})\n`;
+                }
+                comment += `\n`;
+              });
+              if (errors.length > 5) {
+                comment += `\n_...and ${errors.length - 5} more errors. Check the workflow logs for details._\n\n`;
+              }
+            }
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Create issues for findings on master
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.create-issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read Semgrep JSON results
+            let results;
+            try {
+              results = JSON.parse(fs.readFileSync('${{ inputs.path }}/semgrep-results.json', 'utf8'));
+            } catch (error) {
+              console.log('No results file found or invalid JSON');
+              return;
+            }
+
+            const findings = results.results || [];
+            const errors = findings.filter(f => f.extra.severity === 'ERROR');
+
+            if (errors.length === 0) {
+              console.log('No ERROR-level findings to create issues for');
+              return;
+            }
+
+            // Create one issue per ERROR finding
+            for (const finding of errors) {
+              const file = finding.path.replace('${{ inputs.config-path }}/', '');
+              const issueTitle = `[Security] ${finding.check_id} in ${file}`;
+
+              // Check if issue already exists
+              const existingIssues = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                labels: 'security',
+              });
+
+              const alreadyExists = existingIssues.data.some(issue =>
+                issue.title === issueTitle
+              );
+
+              if (alreadyExists) {
+                console.log(`Issue already exists: ${issueTitle}`);
+                continue;
+              }
+
+              // Create issue body
+              let body = `## Security Finding\n\n`;
+              body += `**Rule**: \`${finding.check_id}\`\n`;
+              body += `**Severity**: ERROR ❌\n`;
+              body += `**File**: \`${file}:${finding.start.line}\`\n\n`;
+              body += `### Description\n${finding.extra.message}\n\n`;
+
+              if (finding.extra.metadata) {
+                if (finding.extra.metadata.cwe) {
+                  body += `**CWE**: ${finding.extra.metadata.cwe}\n`;
+                }
+                if (finding.extra.metadata.owasp) {
+                  body += `**OWASP**: ${finding.extra.metadata.owasp}\n`;
+                }
+                if (finding.extra.metadata.references) {
+                  body += `\n**References**:\n`;
+                  finding.extra.metadata.references.forEach(ref => {
+                    body += `- ${ref}\n`;
+                  });
+                }
+              }
+
+              body += `\n### Code\n\`\`\`\n${finding.extra.lines}\n\`\`\`\n`;
+              body += `\n---\n_Automatically created by Semgrep security scan_`;
+
+              // Create the issue
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body: body,
+                labels: ['security', 'semgrep']
+              });
+
+              console.log(`Created issue: ${issueTitle}`);
+            }
+
+      - name: Check for blocking issues
+        if: steps.semgrep.outcome == 'failure' && inputs.fail-on-blocking-issues
+        run: |
+          echo "❌ Semgrep found security issues that must be fixed before merging."
+          echo "Review the findings above and check workflow logs for details."
+          exit 1
