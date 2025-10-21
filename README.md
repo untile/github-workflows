@@ -70,6 +70,32 @@ jobs:
 
 ---
 
+### 3. Semgrep SAST
+
+Reusable workflow for automated security scanning using [Semgrep](https://semgrep.dev):
+
+- Runs configurable [Semgrep rule sets](https://semgrep.dev/explore)
+- Generates PR comments with security findings
+- Creates GitHub issues for critical vulnerabilities on master
+- Supports custom scan paths and rule configurations
+
+Usage example:
+
+```yaml
+jobs:
+  semgrep:
+    uses: untile/github-workflows/.github/workflows/semgrep-sast.yml@semgrep-sast
+    with:
+      path: packages/api
+      semgrep-rules: p/owasp-top-ten p/nodejs p/typescript p/secrets
+      skip-dependabot: false
+      create-pr-comment: true
+      create-issues: true
+      fail-on-blocking-issues: true
+```
+
+---
+
 ## 🔖 Versioning
 
 - Workflows and actions are referenced by **Git tags**.
