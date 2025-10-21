@@ -65,8 +65,8 @@ jobs:
 
           # Build config arguments from semgrep-rules input
           CONFIG_ARGS=""
-          if [ -f "../../.semgrep.yml" ]; then
-            CONFIG_ARGS="--config ../../.semgrep.yml"
+          if [ -f ".semgrep.yml" ]; then
+            CONFIG_ARGS="--config .semgrep.yml"
           fi
           for rule in ${{ inputs.semgrep-rules }}; do
             CONFIG_ARGS="$CONFIG_ARGS --config $rule"
