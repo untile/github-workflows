@@ -1,0 +1,308 @@
+name: Dependencies Security Audit (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: "Node.js version (e.g. '20' or '20.18.0')"
+        required: false
+        default: "22"
+        type: string
+      
+      package_manager:
+        description: "Package manager to use (npm, bun)"
+        required: false
+        default: "npm"
+        type: string
+      
+      audit_level:
+        description: "Minimum severity to report (low, moderate, high, critical)"
+        required: false
+        default: "moderate"
+        type: string
+      
+      block_on_critical:
+        description: "Fail the workflow if critical vulnerabilities found"
+        required: false
+        default: true
+        type: boolean
+      
+      block_on_high:
+        description: "Fail the workflow if high vulnerabilities found"
+        required: false
+        default: false
+        type: boolean
+      
+      create_pr_comment:
+        description: "Create PR comments with findings"
+        required: false
+        default: true
+        type: boolean
+      
+      skip_dependabot:
+        description: "Skip workflow for dependabot PRs"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  audit:
+    name: Dependencies Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Skip on dependabot PRs if configured
+    if: ${{ !inputs.skip_dependabot || github.actor != 'dependabot[bot]' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: ${{ inputs.package_manager != 'bun' && inputs.package_manager || '' }}
+
+      - name: Setup Bun
+        if: inputs.package_manager == 'bun'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: |
+          case "${{ inputs.package_manager }}" in
+            npm)
+              npm ci
+              ;;
+            bun)
+              bun install --frozen-lockfile
+              ;;
+            *)
+              echo "Unsupported package manager: ${{ inputs.package_manager }}"
+              exit 1
+              ;;
+          esac
+
+      - name: Run security audit
+        id: audit
+        run: |
+          # Run audit based on package manager
+          case "${{ inputs.package_manager }}" in
+            npm)
+              npm audit --audit-level=${{ inputs.audit_level }} --json > audit-results.json || true
+              npm audit --audit-level=${{ inputs.audit_level }} > audit-readable.txt || true
+              ;;
+            bun)
+              # Bun audit is experimental, fallback to npm if needed
+              bun audit --json > audit-results.json 2>/dev/null || npm audit --audit-level=${{ inputs.audit_level }} --json > audit-results.json || true
+              bun audit > audit-readable.txt 2>/dev/null || npm audit --audit-level=${{ inputs.audit_level }} > audit-readable.txt || true
+              ;;
+          esac
+
+          # Parse results
+          CRITICAL=$(jq -r '.metadata.vulnerabilities.critical // 0' audit-results.json)
+          HIGH=$(jq -r '.metadata.vulnerabilities.high // 0' audit-results.json)
+          MODERATE=$(jq -r '.metadata.vulnerabilities.moderate // 0' audit-results.json)
+          LOW=$(jq -r '.metadata.vulnerabilities.low // 0' audit-results.json)
+
+          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "high=$HIGH" >> $GITHUB_OUTPUT
+          echo "moderate=$MODERATE" >> $GITHUB_OUTPUT
+          echo "low=$LOW" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit-results
+          path: |
+            audit-results.json
+            audit-readable.txt
+
+      - name: Comment on PR with results
+        if: github.event_name == 'pull_request' && inputs.create_pr_comment
+        uses: actions/github-script@v7
+        env:
+          CRITICAL: ${{ steps.audit.outputs.critical }}
+          HIGH: ${{ steps.audit.outputs.high }}
+          MODERATE: ${{ steps.audit.outputs.moderate }}
+          LOW: ${{ steps.audit.outputs.low }}
+          PACKAGE_MANAGER: ${{ inputs.package_manager }}
+        with:
+          script: |
+            const fs = require('fs');
+            const critical = process.env.CRITICAL || '0';
+            const high = process.env.HIGH || '0';
+            const moderate = process.env.MODERATE || '0';
+            const low = process.env.LOW || '0';
+            const packageManager = process.env.PACKAGE_MANAGER || 'npm';
+
+            const totalVulns = parseInt(critical) + parseInt(high) + parseInt(moderate) + parseInt(low);
+
+            let comment = '## 📦 Dependency Security Audit\n\n';
+
+            if (totalVulns === 0) {
+              comment += '✅ **No vulnerabilities found!** All dependencies are secure.\n';
+            } else {
+              comment += `⚠️ **Found ${totalVulns} vulnerabilit${totalVulns === 1 ? 'y' : 'ies'}**\n\n`;
+              comment += '| Severity | Count |\n';
+              comment += '|----------|-------|\n';
+              comment += `| 🔴 Critical | ${critical} |\n`;
+              comment += `| 🟠 High | ${high} |\n`;
+              comment += `| 🟡 Moderate | ${moderate} |\n`;
+              comment += `| ⚪ Low | ${low} |\n\n`;
+
+              // Read detailed results if available
+              try {
+                const auditText = fs.readFileSync('audit-readable.txt', 'utf8');
+                comment += '<details>\n<summary>📋 View Details</summary>\n\n';
+                comment += '```\n' + auditText.slice(0, 5000) + '\n```\n';
+                comment += '</details>\n\n';
+              } catch (e) {
+                console.log('Could not read audit results');
+              }
+
+              comment += '\n### 🔧 Remediation\n\n';
+
+              if (parseInt(critical) > 0) {
+                comment += '**Critical vulnerabilities require immediate attention:**\n';
+                comment += '1. Review findings above\n';
+                comment += `2. Run \`${packageManager} audit fix\` to auto-fix if possible\n`;
+                comment += '3. Manually update packages if auto-fix unavailable\n\n';
+                comment += '⚠️ **This PR may be blocked until Critical vulnerabilities are resolved.**\n';
+              } else if (parseInt(high) > 0) {
+                comment += '**High severity vulnerabilities should be fixed:**\n';
+                comment += `- Run \`${packageManager} audit fix\` to attempt automatic fixes\n`;
+                comment += '- Review and test changes\n\n';
+              } else {
+                comment += '**Lower severity vulnerabilities:**\n';
+                comment += `- Consider fixing with \`${packageManager} audit fix\`\n`;
+                comment += '- Review if fixes cause breaking changes\n';
+                comment += '- Can be deferred if risk is acceptable\n\n';
+              }
+            }
+
+            comment += '\n---\n';
+            comment += `💡 **Tip**: Run \`${packageManager} audit\` locally to see detailed vulnerability information.\n`;
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Check for blocking vulnerabilities
+        if: |
+          (inputs.block_on_critical && steps.audit.outputs.critical != '0') ||
+          (inputs.block_on_high && steps.audit.outputs.high != '0')
+        run: |
+          echo "❌ Blocking vulnerabilities found."
+          echo ""
+          echo "Critical: ${{ steps.audit.outputs.critical }}"
+          echo "High: ${{ steps.audit.outputs.high }}"
+          echo ""
+          echo "To fix:"
+          echo "  1. Run '${{ inputs.package_manager }} audit fix' to auto-fix"
+          echo "  2. Review and test changes"
+          echo "  3. Manually update packages if needed"
+          exit 1
+
+      - name: Create issue for vulnerabilities (schedule only)
+        if: |
+          github.event_name == 'schedule' &&
+          (steps.audit.outputs.critical != '0' || steps.audit.outputs.high != '0')
+        uses: actions/github-script@v7
+        env:
+          CRITICAL: ${{ steps.audit.outputs.critical }}
+          HIGH: ${{ steps.audit.outputs.high }}
+          MODERATE: ${{ steps.audit.outputs.moderate }}
+          LOW: ${{ steps.audit.outputs.low }}
+          PACKAGE_MANAGER: ${{ inputs.package_manager }}
+        with:
+          script: |
+            const critical = process.env.CRITICAL || '0';
+            const high = process.env.HIGH || '0';
+            const moderate = process.env.MODERATE || '0';
+            const low = process.env.LOW || '0';
+            const packageManager = process.env.PACKAGE_MANAGER || 'npm';
+
+            const title = `[Security] ${critical} Critical and ${high} High dependency vulnerabilities found`;
+
+            let body = '## 📦 Dependency Security Scan\n\n';
+            body += `**Scan Date**: ${new Date().toISOString().split('T')[0]}\n`;
+            body += `**Package Manager**: ${packageManager}\n\n`;
+            body += '### Summary\n\n';
+            body += `- 🔴 Critical: ${critical}\n`;
+            body += `- 🟠 High: ${high}\n`;
+            body += `- 🟡 Moderate: ${moderate}\n`;
+            body += `- ⚪ Low: ${low}\n\n`;
+            body += '### Action Required\n\n';
+            body += '1. Review [audit results](https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId + ')\n';
+            body += `2. Run \`${packageManager} audit\` locally for details\n`;
+            body += '3. Fix vulnerabilities:\n';
+            body += '   ```bash\n';
+            body += `   ${packageManager} audit fix\n`;
+            
+            if (packageManager === 'npm') {
+              body += `   ${packageManager} audit fix --force  # if needed\n`;
+            }
+            
+            body += '   ```\n';
+            body += '4. Update dependencies that require manual intervention\n';
+
+            const labels = ['security', 'dependencies'];
+            if (critical !== '0') {
+              labels.push('security-critical');
+            }
+
+            // Check if issue already exists
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'security',
+            });
+
+            const alreadyExists = existingIssues.data.some(issue =>
+              issue.title.includes('dependency vulnerabilities found') &&
+              issue.labels.some(label => label.name === 'security')
+            );
+
+            if (alreadyExists) {
+              console.log('Security issue already exists. Updating existing issue instead.');
+              
+              // Find the most recent security issue
+              const securityIssue = existingIssues.data
+                .filter(issue => issue.labels.some(label => label.name === 'security'))
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+
+              if (securityIssue) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: securityIssue.number,
+                  body: `## 🔄 Updated Scan Results\n\n${body}`
+                });
+                console.log(`Updated issue #${securityIssue.number}`);
+              }
+            } else {
+              // Create new issue
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: labels
+              });
+              console.log('Created new security issue');
+            }
+
