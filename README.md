@@ -15,6 +15,8 @@ Centralizes CI/CD pipelines, composite actions, and shared automation logic to k
 
 ## 🚀 Available Workflows
 
+This repository contains 4 reusable workflows:
+
 ### 1. [Mobile Pull Request](documentation/mobile-pull-request.md)
 Reusable workflow to run the mobile project **test suite**, including:
 - Node.js and Bun setup
@@ -70,7 +72,7 @@ jobs:
 
 ---
 
-### 3. Semgrep SAST
+### 3. [Semgrep SAST](documentation/semgrep-sast.md)
 
 Reusable workflow for automated security scanning using [Semgrep](https://semgrep.dev):
 
@@ -92,6 +94,41 @@ jobs:
       create-pr-comment: true
       create-issues: true
       fail-on-blocking-issues: true
+```
+
+---
+
+### 4. [Dependencies Security Audit](documentation/dependencies-audit.md)
+
+Reusable workflow for **dependency security auditing** with npm or bun:
+
+- Scans for vulnerabilities in project dependencies
+- Comments on PRs with detailed findings and remediation steps
+- Blocks PRs on critical/high vulnerabilities (configurable)
+- Creates tracking issues on scheduled runs
+- Supports multiple package managers
+
+Usage example:
+
+```yaml
+jobs:
+  audit:
+    uses: untile/github-workflows/.github/workflows/dependencies-audit.yml@v1
+    with:
+      package_manager: "npm"
+      audit_level: "moderate"
+      block_on_critical: true
+```
+
+Scheduled scan example:
+
+```yaml
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Weekly
+jobs:
+  audit:
+    uses: untile/github-workflows/.github/workflows/dependencies-audit.yml@v1
 ```
 
 ---
