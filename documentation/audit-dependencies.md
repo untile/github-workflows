@@ -47,14 +47,14 @@ This workflow **does not require any secrets**.
 ```yaml
 jobs:
   audit:
-    uses: untile/github-workflows/.github/workflows/dependencies-audit.yml@v1
+    uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
 ```
 
 ### Custom Configuration (Bun project)
 ```yaml
 jobs:
   audit:
-    uses: untile/github-workflows/.github/workflows/dependencies-audit.yml@v1
+    uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
     with:
       node_version: "20"
       package_manager: "bun"
@@ -67,7 +67,7 @@ jobs:
 ```yaml
 jobs:
   audit:
-    uses: untile/github-workflows/.github/workflows/dependencies-audit.yml@v1
+    uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
     with:
       audit_level: "high"
       block_on_critical: true
@@ -86,7 +86,7 @@ on:
 
 jobs:
   audit:
-    uses: untile/github-workflows/.github/workflows/dependencies-audit.yml@v1
+    uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
 ```
 
 ### Pull Request Trigger
@@ -103,7 +103,7 @@ on:
 
 jobs:
   audit:
-    uses: untile/github-workflows/.github/workflows/dependencies-audit.yml@v1
+    uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
     with:
       package_manager: "npm"
       block_on_critical: true
@@ -281,7 +281,7 @@ on:
 jobs:
   # Security audit on dependency changes
   security-audit:
-    uses: untile/github-workflows/.github/workflows/dependencies-audit.yml@v1
+    uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
     with:
       package_manager: "npm"
       block_on_critical: true
@@ -313,7 +313,7 @@ on:
 
 jobs:
   dependency-audit:
-    uses: untile/github-workflows/.github/workflows/dependencies-audit.yml@v1
+    uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
   
   sast-scan:
     uses: untile/github-workflows/.github/workflows/semgrep-sast.yml@v1
@@ -359,7 +359,7 @@ on:
       - 'package-lock.json'
 jobs:
   audit:
-    uses: untile/github-workflows/.github/workflows/dependencies-audit.yml@v1
+    uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
     with:
       node_version: "22"
       block_on_critical: true
