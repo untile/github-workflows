@@ -43,6 +43,7 @@ jobs:
   semgrep:
     name: Semgrep Security Analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     # Skip on dependabot PRs if configured
     if: ${{ !inputs.skip-dependabot || github.actor != 'dependabot[bot]' }}
