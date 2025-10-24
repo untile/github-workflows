@@ -120,7 +120,7 @@ Usage example:
 ```yaml
 jobs:
   semgrep:
-    uses: untile/github-workflows/.github/workflows/semgrep-sast.yml@semgrep-sast
+    uses: untile/github-workflows/.github/workflows/semgrep-sast.yml@v1
     with:
       path: packages/api
       semgrep-rules: p/owasp-top-ten p/nodejs p/typescript p/secrets
