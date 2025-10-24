@@ -23,7 +23,7 @@ Reusable workflow for **dependency security auditing** with npm or bun:
 
 - Scans for vulnerabilities in project dependencies
 - Comments on PRs with detailed findings and remediation steps
-- Blocks PRs on critical/high vulnerabilities (configurable)
+- Blocks PRs based on severity level (configurable: high or critical)
 - Creates tracking issues on scheduled runs
 - Supports multiple package managers
 
@@ -34,9 +34,8 @@ jobs:
   audit:
     uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
     with:
-      package_manager: "npm"
-      audit_level: "moderate"
-      block_on_critical: true
+      package_manager: "npm"            # Optional: npm or bun, defaults to "npm"
+      block_severity_level: "high"      # Optional: "high" or "critical", defaults to "high"
 ```
 
 Scheduled scan example:

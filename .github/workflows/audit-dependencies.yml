@@ -14,24 +14,12 @@ on:
         required: false
         default: "npm"
         type: string
-      
-      audit_level:
-        description: "Minimum severity to report (low, moderate, high, critical)"
+
+      block_severity_level:
+        description: "Block workflow if vulnerabilities at or above this level are found (high, critical)"
         required: false
-        default: "moderate"
+        default: "high"
         type: string
-      
-      block_on_critical:
-        description: "Fail the workflow if critical vulnerabilities found"
-        required: false
-        default: true
-        type: boolean
-      
-      block_on_high:
-        description: "Fail the workflow if high vulnerabilities found"
-        required: false
-        default: false
-        type: boolean
       
       create_pr_comment:
         description: "Create PR comments with findings"
@@ -96,13 +84,13 @@ jobs:
           # Run audit based on package manager
           case "${{ inputs.package_manager }}" in
             npm)
-              npm audit --audit-level=${{ inputs.audit_level }} --json > audit-results.json || true
-              npm audit --audit-level=${{ inputs.audit_level }} > audit-readable.txt || true
+              npm audit --json > audit-results.json || true
+              npm audit > audit-readable.txt || true
               ;;
             bun)
               # Bun audit is experimental, fallback to npm if needed
-              bun audit --json > audit-results.json 2>/dev/null || npm audit --audit-level=${{ inputs.audit_level }} --json > audit-results.json || true
-              bun audit > audit-readable.txt 2>/dev/null || npm audit --audit-level=${{ inputs.audit_level }} > audit-readable.txt || true
+              bun audit --json > audit-results.json 2>/dev/null || npm audit --json > audit-results.json || true
+              bun audit > audit-readable.txt 2>/dev/null || npm audit > audit-readable.txt || true
               ;;
           esac
 
@@ -202,13 +190,15 @@ jobs:
 
       - name: Check for blocking vulnerabilities
         if: |
-          (inputs.block_on_critical && steps.audit.outputs.critical != '0') ||
-          (inputs.block_on_high && steps.audit.outputs.high != '0')
+          (inputs.block_severity_level == 'critical' && steps.audit.outputs.critical != '0') ||
+          (inputs.block_severity_level == 'high' && (steps.audit.outputs.critical != '0' || steps.audit.outputs.high != '0'))
         run: |
-          echo "❌ Blocking vulnerabilities found."
+          echo "❌ Blocking vulnerabilities found at or above '${{ inputs.block_severity_level }}' severity level."
           echo ""
           echo "Critical: ${{ steps.audit.outputs.critical }}"
           echo "High: ${{ steps.audit.outputs.high }}"
+          echo "Moderate: ${{ steps.audit.outputs.moderate }}"
+          echo "Low: ${{ steps.audit.outputs.low }}"
           echo ""
           echo "To fix:"
           echo "  1. Run '${{ inputs.package_manager }} audit fix' to auto-fix"

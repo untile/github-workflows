@@ -15,17 +15,13 @@ None - all inputs have sensible defaults.
 - **node_version** (string, default `"22"`)  
   Node.js version to install (e.g., `"20"`, `"20.18.0"`, `"22"`).
 
-- **package_manager** (string, default `"npm"`)  
+- **package_manager** (string, default `"npm"`)
   Package manager to use. Options: `npm`, `bun`.
 
-- **audit_level** (string, default `"moderate"`)  
-  Minimum severity level to report. Options: `low`, `moderate`, `high`, `critical`.
-
-- **block_on_critical** (boolean, default `true`)  
-  Fail the workflow if critical vulnerabilities are found.
-
-- **block_on_high** (boolean, default `false`)  
-  Fail the workflow if high severity vulnerabilities are found.
+- **block_severity_level** (string, default `"high"`)
+  Block workflow if vulnerabilities at or above this level are found. Options: `high`, `critical`.
+  - `critical` - Only block on critical vulnerabilities
+  - `high` - Block on both high and critical vulnerabilities
 
 - **create_pr_comment** (boolean, default `true`)  
   Post detailed audit results as a PR comment.
@@ -58,9 +54,7 @@ jobs:
     with:
       node_version: "20"
       package_manager: "bun"
-      audit_level: "high"
-      block_on_critical: true
-      block_on_high: false
+      block_severity_level: "critical"
 ```
 
 ### Strict Mode (Block on High + Critical)
@@ -69,9 +63,7 @@ jobs:
   audit:
     uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
     with:
-      audit_level: "high"
-      block_on_critical: true
-      block_on_high: true
+      block_severity_level: "high"
 ```
 
 ### Scheduled Security Scan
@@ -106,7 +98,7 @@ jobs:
     uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
     with:
       package_manager: "npm"
-      block_on_critical: true
+      block_severity_level: "high"
 ```
 
 ---
@@ -114,9 +106,9 @@ jobs:
 ## 📊 What This Workflow Does
 
 1. ✅ Checks out code
-2. ✅ Sets up Node.js and package manager (npm/bun/yarn)
+2. ✅ Sets up Node.js and package manager (npm/bun)
 3. ✅ Installs dependencies with frozen lockfile
-4. ✅ Runs security audit with specified audit level
+4. ✅ Runs security audit
 5. ✅ Parses vulnerability counts by severity (critical/high/moderate/low)
 6. ✅ Uploads audit results as GitHub artifacts
 7. ✅ (PR only) Posts formatted comment with:
@@ -124,7 +116,7 @@ jobs:
    - Detailed findings (collapsible, truncated to 5000 chars)
    - Remediation steps (package manager specific)
    - Fix commands and tips
-8. ✅ (Optional) Fails workflow if blocking vulnerabilities found
+8. ✅ Fails workflow if vulnerabilities at or above `block_severity_level` are found
 9. ✅ (Schedule only) Creates/updates GitHub issue with:
    - Vulnerability summary
    - Action required steps
@@ -216,8 +208,9 @@ When run on schedule (e.g., weekly), the workflow creates/updates issues:
 
 ## 🚨 Blocking Behavior
 
-- If `block_on_critical: true` → workflow **fails** when critical vulnerabilities found
-- If `block_on_high: true` → workflow **fails** when high vulnerabilities found
+The workflow blocks based on the `block_severity_level` input:
+- `block_severity_level: "critical"` → workflow **fails** when critical vulnerabilities found
+- `block_severity_level: "high"` (default) → workflow **fails** when high **or** critical vulnerabilities found
 - Failed workflows **prevent PR merges** (if configured as required check in branch protection)
 
 **Exit behavior**:
@@ -248,8 +241,8 @@ When run on schedule (e.g., weekly), the workflow creates/updates issues:
    ```
 
 2. **Set appropriate blocking levels**:
-   - Always use `block_on_critical: true`
-   - Consider `block_on_high: true` for production apps
+   - Use `block_severity_level: "high"` (default) for production apps - blocks on both high and critical
+   - Use `block_severity_level: "critical"` for less strict environments - blocks only on critical
 
 3. **Run scheduled scans**:
    ```yaml
@@ -284,7 +277,7 @@ jobs:
     uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
     with:
       package_manager: "npm"
-      block_on_critical: true
+      block_severity_level: "high"
 
   # Linting and tests
   test:
@@ -362,7 +355,7 @@ jobs:
     uses: untile/github-workflows/.github/workflows/audit-dependencies.yml@v1
     with:
       node_version: "22"
-      block_on_critical: true
+      block_severity_level: "high"
 ```
 
 **Benefits**:
