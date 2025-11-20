@@ -224,9 +224,34 @@ jobs:
               console.log(`Created issue: ${issueTitle}`);
             }
 
+      - name: Upload Semgrep results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-results
+          path: ${{ inputs.path }}/semgrep-results.json
+          retention-days: 30
+
       - name: Check for blocking issues
-        if: steps.semgrep.outcome == 'failure' && inputs.fail-on-blocking-issues
+        if: inputs.fail-on-blocking-issues
         run: |
-          echo "❌ Semgrep found security issues that must be fixed before merging."
-          echo "Review the findings above and check workflow logs for details."
-          exit 1
+          cd ${{ inputs.path }}
+
+          # Check if results file exists
+          if [ ! -f "semgrep-results.json" ]; then
+            echo "⚠️ No semgrep results file found"
+            exit 0
+          fi
+
+          # Count ERROR-level findings (blocking issues)
+          BLOCKING_COUNT=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-results.json)
+
+          echo "Found $BLOCKING_COUNT blocking issue(s)"
+
+          if [ "$BLOCKING_COUNT" -gt 0 ]; then
+            echo "❌ Semgrep found $BLOCKING_COUNT blocking security issue(s) that must be fixed before merging."
+            echo "Review the findings above and check workflow logs for details."
+            exit 1
+          else
+            echo "✅ No blocking issues found"
+          fi
