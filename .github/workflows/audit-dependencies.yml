@@ -8,42 +8,47 @@ on:
         required: false
         default: "22"
         type: string
-      
+
       package_manager:
         description: "Package manager to use (npm, bun)"
         required: false
         default: "npm"
         type: string
-      
+
       audit_level:
         description: "Minimum severity to report (low, moderate, high, critical)"
         required: false
         default: "moderate"
         type: string
-      
+
       block_on_critical:
         description: "Fail the workflow if critical vulnerabilities found"
         required: false
         default: true
         type: boolean
-      
+
       block_on_high:
         description: "Fail the workflow if high vulnerabilities found"
         required: false
         default: false
         type: boolean
-      
+
       create_pr_comment:
         description: "Create PR comments with findings"
         required: false
         default: true
         type: boolean
-      
+
       skip_dependabot:
         description: "Skip workflow for dependabot PRs"
         required: false
         default: true
         type: boolean
+
+    secrets:
+      registry_token:
+        description: "GitHub token for private package registry access (optional)"
+        required: false
 
 permissions:
   contents: read
@@ -68,6 +73,9 @@ jobs:
         with:
           node-version: ${{ inputs.node_version }}
           cache: ${{ inputs.package_manager != 'bun' && inputs.package_manager || '' }}
+          registry-url: ${{ secrets.registry_token && 'https://npm.pkg.github.com' || '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.registry_token }}
 
       - name: Setup Bun
         if: inputs.package_manager == 'bun'
