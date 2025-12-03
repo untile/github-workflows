@@ -67,6 +67,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -76,6 +78,11 @@ jobs:
           registry-url: ${{ secrets.registry_token && 'https://npm.pkg.github.com' || '' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.registry_token }}
+
+      - name: Configure Git auth for private GitHub packages
+        run: |
+          git config --global url."https://${{ secrets.registry_token }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${{ secrets.registry_token }}@github.com/".insteadOf "https://git@github.com/"
 
       - name: Setup Bun
         if: inputs.package_manager == 'bun'
