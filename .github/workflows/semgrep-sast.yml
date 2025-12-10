@@ -231,6 +231,7 @@ jobs:
           name: semgrep-results
           path: ${{ inputs.path }}/semgrep-results.json
           retention-days: 30
+          overwrite: true
 
       - name: Check for blocking issues
         if: inputs.fail-on-blocking-issues
