@@ -15,6 +15,12 @@ on:
         default: "npm"
         type: string
 
+      npm_version:
+        description: "npm version to use (e.g. '11', '11.2.0'). If empty, uses the version bundled with Node.js"
+        required: false
+        default: ""
+        type: string
+
       audit_level:
         description: "Minimum severity to report (low, moderate, high, critical)"
         required: false
@@ -83,6 +89,10 @@ jobs:
         run: |
           git config --global url."https://${{ secrets.registry_token }}@github.com/".insteadOf "https://github.com/"
           git config --global url."https://${{ secrets.registry_token }}@github.com/".insteadOf "https://git@github.com/"
+
+      - name: Upgrade npm
+        if: inputs.npm_version != ''
+        run: npm install -g npm@${{ inputs.npm_version }}
 
       - name: Setup Bun
         if: inputs.package_manager == 'bun'
@@ -266,11 +276,11 @@ jobs:
             body += '3. Fix vulnerabilities:\n';
             body += '   ```bash\n';
             body += `   ${packageManager} audit fix\n`;
-            
+
             if (packageManager === 'npm') {
               body += `   ${packageManager} audit fix --force  # if needed\n`;
             }
-            
+
             body += '   ```\n';
             body += '4. Update dependencies that require manual intervention\n';
 
@@ -294,7 +304,7 @@ jobs:
 
             if (alreadyExists) {
               console.log('Security issue already exists. Updating existing issue instead.');
-              
+
               // Find the most recent security issue
               const securityIssue = existingIssues.data
                 .filter(issue => issue.labels.some(label => label.name === 'security'))
@@ -320,4 +330,3 @@ jobs:
               });
               console.log('Created new security issue');
             }
-

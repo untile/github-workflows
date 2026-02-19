@@ -18,6 +18,9 @@ None - all inputs have sensible defaults.
 - **package_manager** (string, default `"npm"`)  
   Package manager to use. Options: `npm`, `bun`.
 
+- **npm_version** (string, default `""`)
+  npm version to use (e.g. "11", "11.2.0"). If empty, uses the version bundled with Node.js.
+
 - **audit_level** (string, default `"moderate"`)  
   Minimum severity level to report. Options: `low`, `moderate`, `high`, `critical`.
 
