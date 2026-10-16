@@ -36,6 +36,9 @@ None - all inputs have sensible defaults.
 - **skip_dependabot** (boolean, default `true`)  
   Skip this workflow for PRs created by Dependabot to avoid noise.
 
+- **runs_on** (string, default `""`)  
+  Runner label for the job. When empty, uses the `RUNNER` Actions variable (set at org level; a repository variable with the same name overrides it), falling back to `ubuntu-latest`. Set it to pin this workflow to a specific runner, e.g. `ubuntu-latest` or `untile-large`.
+
 ---
 
 ## 🔑 Secrets

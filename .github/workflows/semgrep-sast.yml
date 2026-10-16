@@ -33,6 +33,11 @@ on:
         required: false
         type: boolean
         default: true
+      runs-on:
+        description: Runner label for the job. Empty uses the RUNNER variable (org or repo), falling back to ubuntu-latest
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -42,7 +47,7 @@ permissions:
 jobs:
   semgrep:
     name: Semgrep Security Analysis
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on || vars.RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
 
     # Skip on dependabot PRs if configured
@@ -53,6 +58,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Install Semgrep
         run: |

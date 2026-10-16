@@ -36,6 +36,9 @@ None - all inputs have sensible defaults.
 - **fail-on-blocking-issues** (boolean, default `true`)  
   Fail the workflow if ERROR-level security issues are found.
 
+- **runs-on** (string, default `""`)  
+  Runner label for the job. When empty, uses the `RUNNER` Actions variable (set at org level; a repository variable with the same name overrides it), falling back to `ubuntu-latest`. Set it to pin this workflow to a specific runner, e.g. `ubuntu-latest` or `untile-large`.
+
 ---
 
 ## 🔑 Secrets

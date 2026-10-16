@@ -28,11 +28,16 @@ on:
         required: false
         default: true
         type: boolean
+      runs_on:
+        description: "Runner label for the job. Empty uses the RUNNER variable (org or repo), falling back to ubuntu-latest"
+        required: false
+        default: ""
+        type: string
 
 jobs:
   test:
     timeout-minutes: 20
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on || vars.RUNNER || 'ubuntu-latest' }}
 
     steps:
       - name: 📝 Checkout code
