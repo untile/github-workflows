@@ -22,6 +22,9 @@ It sets up Node.js and Bun, installs dependencies, lints commits, and runs lint 
 - **cache_modules** (boolean, default `true`)  
   Enable caching of `node_modules` and `bun.lockb`.
 
+- **runs_on** (string, default `""`)  
+  Runner label for the job. When empty, uses the `RUNNER` Actions variable (set at org level; a repository variable with the same name overrides it), falling back to `ubuntu-latest`. Set it to pin this workflow to a specific runner, e.g. `ubuntu-latest` or `untile-large`.
+
 ---
 
 ## 🛠️ Secrets

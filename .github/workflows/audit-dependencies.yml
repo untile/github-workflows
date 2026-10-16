@@ -51,6 +51,12 @@ on:
         default: true
         type: boolean
 
+      runs_on:
+        description: "Runner label for the job. Empty uses the RUNNER variable (org or repo), falling back to ubuntu-latest"
+        required: false
+        default: ""
+        type: string
+
     secrets:
       registry_token:
         description: "GitHub token for private package registry access (optional)"
@@ -64,7 +70,7 @@ permissions:
 jobs:
   audit:
     name: Dependencies Security Audit
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on || vars.RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
 
     # Skip on dependabot PRs if configured
